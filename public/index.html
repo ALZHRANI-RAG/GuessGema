@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <title>لعبة التخمين - نظام الهوست</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: sans-serif; }
+        body { background: #121212; color: white; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
+        
+        /* شاشة الدخول وصناعة الهوست */
+        .setup-screen { display: flex; flex-direction: column; gap: 15px; background: #1e1e1e; padding: 30px; border-radius: 8px; border: 2px solid #fff; text-align: center; }
+        .setup-screen button { padding: 10px; font-size: 16px; font-weight: bold; cursor: pointer; background: #00ff00; border: none; }
+        .setup-screen input { padding: 10px; font-size: 16px; text-align: center; }
+
+        /* شاشة اللعبة (مخفية في البداية) */
+        .game-container { display: none; position: relative; width: 85%; height: 75vh; background: #1e1e1e; border: 4px solid #fff; border-radius: 8px; justify-content: center; align-items: center; }
+        .A1-header { position: absolute; top: -40px; font-size: 24px; font-weight: bold; text-decoration: underline; }
+        .F1-image-area { width: 80%; height: 80%; border: 2px dashed #555; display: flex; justify-content: center; align-items: center; }
+        .F1-image-area img { max-width: 100%; max-height: 100%; object-fit: contain; }
+        .B1-timer-bar { position: absolute; right: -40px; top: 10%; width: 20px; height: 80%; background: #333; overflow: hidden; }
+        .timer-progress { width: 100%; height: 100%; background: #00ff00; }
+        .left-controls { position: absolute; left: -100px; top: 20%; display: flex; flex-direction: column; gap: 20px; }
+        .btn-help { padding: 12px; width: 90px; background: #fff; color: #000; font-weight: bold; cursor: pointer; }
+        .bottom-controls { position: absolute; bottom: -60px; width: 100%; display: flex; justify-content: space-between; }
+        .O1-chat { width: 70%; display: flex; gap: 10px; }
+        .O1-chat input { flex: 1; padding: 10px; }
+        .O1-chat button { padding: 10px; background: #00ff00; font-weight: bold; }
+        .chat-box { position: absolute; bottom: 20px; left: 20px; width: 250px; height: 150px; background: rgba(0,0,0,0.7); overflow-y: auto; padding: 10px; font-size: 14px; }
+    </style>
+</head>
+<body>
+
+    <div class="setup-screen" id="setup-screen">
+        <h2>طور التخمين المشترك</h2>
+        <button onclick="createRoom()">اضغط هنا لتكون (الهوست 👑)</button>
+        <hr style="border: 1px solid #333;">
+        <input type="text" id="room-id-input" placeholder="أدخل رقم غرفة خويك">
+        <button style="background: #00bfff;" onclick="joinRoom()">انضمام للعب للغرفة 🎮</button>
+    </div>
+
+    <div class="A1-header" id="round-title" style="display: none;">بانتظار بدء الهوست...</div>
+    <div class="game-container" id="game-container">
+        <div class="left-controls">
+            <button class="btn-help" id="c1-btn" onclick="triggerC1()">C1 اتصـال</button>
+            <button class="btn-help" id="c2-btn" onclick="triggerC2()">C2 ذكاء AI</button>
+            <button class="btn-help" id="c3-btn" onclick="triggerC3()">C3 تغيير</button>
+        </div>
+        <div class="F1-image-area">
+            <span id="loading-text">جاري بدء اللعبة...</span>
+            <img id="game-image" src="" style="display: none;">
+        </div>
+        <div class="B1-timer-bar"><div class="timer-progress" id="timer-bar"></div></div>
+        <div class="chat-box" id="chat-box"></div>
+        <div class="bottom-controls">
+            <div class="O1-chat">
+                <input type="text" id="chat-input" placeholder="انتظر دورك..." disabled />
+                <button id="send-btn" onclick="sendMessage()" disabled>إرسال</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+      const socket = io('http://localhost:3000');
+        let myRoomId = "";
+        let isHost = false;
+        let isMyTurn = false;
+        let timerInterval;
+
+        // 1. الهوست يصنع الغرفة
+        function createRoom() {
+            isHost = true;
+            socket.emit('hostCreateRoom');
+        }
+
+        socket.on('roomCreated', (roomId) => {
+            myRoomId = roomId;
+            alert(`أنت الهوست الآن! اعطِ خويك هذا الرمز ليدخل معك: ${roomId}`);
+            showGameScreen();
+            document.getElementById('loading-text').innerText = `غرفتك: ${roomId} \n بانتظار خويك يدخل...`;
+        });
+
+        // 2. اللاعب الثاني يشبك على الهوست
+        function joinRoom() {
+            const id = document.getElementById('room-id-input').value.trim();
+            if(id) {
+                myRoomId = id;
+                socket.emit('playerJoinRoom', id);
+                showGameScreen();
+            }
+        }
+
+        function showGameScreen() {
+            document.getElementById('setup-screen').style.display = 'none';
+            document.getElementById('game-container').style.display = 'flex';
+            document.getElementById('round-title').style.display = 'block';
+        }
+
+        // استقبال بيانات الجولة من الهوست/السيرفر
+        socket.on('startRoundData', (data) => {
+            document.getElementById('loading-text').style.display = 'none';
+            document.getElementById('round-title').innerText = `الجولة ${data.round}/10: طور ${data.category}`;
+            
+            const img = document.getElementById('game-image');
+            // إذا كنت الهوست، تظهر لك صورة اللاعب الثاني، وإذا كنت لاعب تظهر لك صورة الهوست
+            img.src = isHost ? data.p2Image : data.p1Image;
+            img.style.display = 'block';
+
+            updateTurn(isHost ? data.hostTurn : !data.hostTurn);
+            startTimer(30);
+        });
+
+        socket.on('turnSwitched', (data) => {
+            updateTurn(isHost ? data.hostTurn : !data.hostTurn);
+            startTimer(30);
+        });
+
+        socket.on('receiveMsg', (data) => {
+            const box = document.getElementById('chat-box');
+            box.innerHTML += `<div><b>الخصم:</b> ${data.text}</div>`;
+            box.scrollTop = box.scrollHeight;
+        });
+
+        function updateTurn(myTurn) {
+            isMyTurn = myTurn;
+            document.getElementById('chat-input').disabled = !myTurn;
+            document.getElementById('send-btn').disabled = !myTurn;
+        }
+
+        function sendMessage() {
+            const input = document.getElementById('chat-input');
+            if (input.value.trim() !== "" && isMyTurn) {
+                socket.emit('gameAction', { room: myRoomId, action: 'chat', text: input.value });
+                document.getElementById('chat-box').innerHTML += `<div><b>أنت:</b> ${input.value}</div>`;
+                input.value = "";
+            }
+        }
+
+        function startTimer(duration) {
+            clearInterval(timerInterval);
+            let timeLeft = duration;
+            const bar = document.getElementById('timer-bar');
+            timerInterval = setInterval(() => {
+                timeLeft--;
+                let percentage = (timeLeft / duration) * 100;
+                bar.style.height = `${percentage}%`;
+                if (percentage > 50) bar.style.backgroundColor = '#00ff00';
+                else if (percentage <= 50 && percentage > 20) bar.style.backgroundColor = '#ffff00';
+                else bar.style.backgroundColor = '#ff0000';
+
+                if (timeLeft <= 0) {
+                    clearInterval(timerInterval);
+                    if (isMyTurn && isHost) {
+                        socket.emit('gameAction', { room: myRoomId, action: 'timeout' });
+                    }
+                }
+            }, 1000);
+        }
+
+        // المساعدات C1, C2, C3 يتم إرسال طلبها للهوست ليعالجها
+        function triggerC1() { document.getElementById('c1-btn').disabled = true; startTimer(35); }
+        function triggerC2() { socket.emit('gameAction', { room: myRoomId, action: 'hint' }); }
+        function triggerC3() { socket.emit('gameAction', { room: myRoomId, action: 'change' }); }
+
+        socket.on('hintResult', (msg) => alert(`💡 تلميح: ${msg}`));
+    </script>
+</body>
+</html>
