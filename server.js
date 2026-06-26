@@ -65,6 +65,8 @@ io.on('connection', (socket) => {
     });
 });
 
-server.listen(3000, () => {
-    console.log('السيرفر يعمل بنجاح على المنفذ 3000 🚀');
+// التعديل الموصى به لـ Render لقراءة المنفذ الديناميكي
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+    console.log(`🚀 السيرفر يعمل بنجاح على المنفذ ${PORT}`);
 });
